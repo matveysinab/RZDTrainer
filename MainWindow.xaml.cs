@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace RZDTrainer
 {
@@ -19,6 +20,8 @@ namespace RZDTrainer
         private TrainerEngine _trainerEngine;
         private bool _isRecording = false;
         private VoskCorrector _voskCorrector;
+        private string? _grammarJson;
+        private bool _useVoskGrammar = false; // жёсткая грамматика по умолчанию выключена
 
         private readonly string _settingsPath = "app_settings.json";
 
@@ -46,6 +49,28 @@ namespace RZDTrainer
 
                 var scenarioLoader = new ScenarioLoader();
                 scenarioLoader.Load("scenarios.json");
+
+                // Лексика сценариев.
+                try
+                {
+                    var all = scenarioLoader.GetAllScenarios();
+
+                    // (1) Безопасная привязка результата к словам сценариев — включена всегда,
+                    //     не мешает распознаванию.
+                    _voskCorrector.SetVocabulary(VoskGrammarBuilder.GetVocabulary(all));
+
+                    // (2) Жёсткая грамматика Vosk — строим заранее, но применяем ТОЛЬКО если
+                    //     включено в настройках (на маленькой модели она режет распознавание).
+                    _grammarJson = VoskGrammarBuilder.Build(all);
+                    _useVoskGrammar = LoadSettings().UseVoskGrammar;
+                }
+                catch (Exception gex)
+                {
+                    Debug.WriteLine($"Лексика/грамматика: {gex.Message}");
+                    _grammarJson = null;
+                    _useVoskGrammar = false;
+                }
+
                 var neuralEvaluator = new PythonNeuralEvaluator();
                 _trainerEngine = new TrainerEngine(neuralEvaluator, scenarioLoader);
                 _trainerEngine.OnScenarioLoaded += OnScenarioLoaded;
@@ -66,7 +91,6 @@ namespace RZDTrainer
             try
             {
                 string modelPath = "vosk-model-small-ru-0.22";
-                string grammarPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "grammar.json");
 
                 if (!Directory.Exists(modelPath))
                 {
@@ -84,13 +108,12 @@ namespace RZDTrainer
                 }
 
                 _recognizer = new SpeechRecognizer();
-                string grammarFile = File.Exists(grammarPath) ? grammarPath : null;
-                _recognizer.Initialize(modelPath, 0, grammarFile);
+                _recognizer.Initialize(modelPath, 0, _useVoskGrammar ? _grammarJson : null);
 
                 _recognizer.OnPartialResult += OnPartialResult;
                 _recognizer.OnCompletePhrase += OnCompletePhrase;
 
-                MicStatusText.Text = $"🎤 {devices[0].Name} (с грамматикой)";
+                MicStatusText.Text = $"🎤 {devices[0].Name}" + (_useVoskGrammar ? "  ·  грамматика" : "");
                 MicrophoneButton.IsEnabled = true;
             }
             catch (Exception ex)
@@ -134,11 +157,11 @@ namespace RZDTrainer
 
                 _recognizer?.Dispose();
                 _recognizer = new SpeechRecognizer();
-                _recognizer.Initialize("vosk-model-small-ru-0.22", deviceNumber);
+                _recognizer.Initialize("vosk-model-small-ru-0.22", deviceNumber, _useVoskGrammar ? _grammarJson : null);
                 _recognizer.OnPartialResult += OnPartialResult;
                 _recognizer.OnCompletePhrase += OnCompletePhrase;
 
-                MicStatusText.Text = $"🎤 {deviceName}";
+                MicStatusText.Text = $"🎤 {deviceName}" + (_useVoskGrammar ? "  ·  грамматика" : "");
                 MicrophoneButton.IsEnabled = true;
             }
         }
@@ -154,24 +177,69 @@ namespace RZDTrainer
             {
                 TitleText.Text = $"[{scenario.Id}] {scenario.Title}";
                 ScenarioText.Text = scenario.Context;
+
+                // Сложность сценария
+                DifficultyText.Text = scenario.DifficultyLabel;
+                DifficultyBadge.Background = GetDifficultyBrush(scenario.DifficultyLabel);
+
+                // Картинка сценария (если задана и файл существует)
+                ApplyScenarioImage(scenario);
+
                 ResultPopup.IsOpen = false;
-                LiveText.Text = "Нажмите и удерживайте кнопку микрофона...";
+                LiveText.Text = "Нажмите и удерживайте кнопку микрофона…";
+                LiveText.Foreground = (Brush)new BrushConverter().ConvertFromString("#90A0B0");
                 StatusText.Text = "Готов к работе";
             });
         }
 
+        // Показывает картинку сценария или прячет блок, если картинки нет
+        private void ApplyScenarioImage(Scenario scenario)
+        {
+            var path = scenario.ImageFullPath;
+            if (string.IsNullOrEmpty(path))
+            {
+                ScenarioImage.Source = null;
+                ImageCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;          // не блокируем файл
+                bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+                bmp.UriSource = new Uri(path, UriKind.Absolute);
+                bmp.EndInit();
+                bmp.Freeze();
+                ScenarioImage.Source = bmp;
+                ImageCard.Visibility = Visibility.Visible;
+            }
+            catch
+            {
+                ScenarioImage.Source = null;
+                ImageCard.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        // Цвет бейджа сложности
+        private static Brush GetDifficultyBrush(string difficulty)
+        {
+            var d = (difficulty ?? "").Trim().ToLowerInvariant();
+            string hex = d switch
+            {
+                "лёгкий" or "легкий" => "#2E7D32",
+                "сложный" => "#C62828",
+                "средний" => "#EF6C00",
+                _ => "#607D8B"
+            };
+            return (Brush)new BrushConverter().ConvertFromString(hex);
+        }
+
         private void OnPartialResult(string partial)
         {
-            var corrected = partial.ToLower()
-                .Replace("иванав", "иванов")
-                .Replace("ивановы", "иванов")
-                .Replace("вагоновов", "вагонов")
-                .Replace("вагонавов", "вагонов")
-                .Replace("вагонав", "вагонов")
-                .Replace("вагонава", "вагонов")
-                .Replace("вагонавы", "вагонов")
-                .Replace("вагон", "вагонов")
-                .Replace("вагона", "вагонов");
+            // Единый безопасный корректор (по целым словам) вместо подстрочных замен
+            var corrected = _voskCorrector.Correct(partial);
 
             Dispatcher.Invoke(() =>
             {
@@ -179,64 +247,13 @@ namespace RZDTrainer
                 LiveText.Foreground = Brushes.Black;
             });
         }
+
         private async void OnCompletePhrase(string phrase)
         {
             Debug.WriteLine($"=== ОРИГИНАЛ: '{phrase}'");
 
-            var corrected = phrase.ToLower();
-
-            // Сначала заменяем длинные (чтобы не испортить короткие)
-            var replacements = new Dictionary<string, string>
-    {
-        // Длинные фразы
-        { "вагонова", "вагонов" },
-        { "вагоновов", "вагонов" },
-        { "вагонавов", "вагонов" },
-        { "вагонава", "вагонов" },
-        { "вагонавы", "вагонов" },
-        { "ваганов", "вагонов" },
-        { "вагонав", "вагонов" },
-        { "вагонв", "вагонов" },
-        { "составителей", "составитель" },
-        { "составители", "составитель" },
-        { "составителья", "составитель" },
-        { "дежурные", "дежурный" },
-        { "выбранные", "дежурный" },
-        { "иванав", "иванов" },
-        { "иванова", "иванов" },
-        { "воров", "иванов" },
-        { "передвинуть", "переставьте" },
-        
-        // Короткие (только целые слова)
-        { "вагона", "вагонов" },
-        { "вагоны", "вагонов" },
-        { "шесть", "6" },
-        { "шестой", "6" },
-        { "шестого", "6" },
-        { "десять", "10" },
-        { "десятого", "10" },
-        { "путина", "путь" },
-        { "пути", "путь" },
-        { "но", "на" },
-        { "же", "на" },
-        { "по", "на" },
-        { "первая", "первый" },
-        { "готова", "готов" },
-        { "готовы", "готов" },
-    };
-
-            // Применяем замены
-            foreach (var rep in replacements)
-            {
-                corrected = corrected.Replace(rep.Key, rep.Value);
-            }
-
-            // Дополнительно: исправляем "вагонав вагонав" в "вагонов вагонов"
-            corrected = corrected.Replace("вагонав", "вагонов");
-
-            // Чистим пробелы
-            while (corrected.Contains("  "))
-                corrected = corrected.Replace("  ", " ");
+            // Все исправления — в одном месте (VoskCorrector), строго по целым словам.
+            var corrected = _voskCorrector.Correct(phrase);
 
             Debug.WriteLine($"=== ИСПРАВЛЕНО: '{corrected}'");
 
@@ -302,17 +319,20 @@ namespace RZDTrainer
             {
                 VerdictText.Text = "❌ ОШИБКА ОЦЕНКИ";
                 VerdictText.Foreground = Brushes.Red;
+                VerdictBanner.Background = (Brush)new BrushConverter().ConvertFromString("#FDECEA");
                 ExtraInfoText.Text = result.ErrorMessage;
             }
             else if (result.IsCorrect)
             {
                 VerdictText.Text = $"✅ ПРАВИЛЬНО! {result.Score}%";
-                VerdictText.Foreground = Brushes.Green;
+                VerdictText.Foreground = (Brush)new BrushConverter().ConvertFromString("#1B5E20");
+                VerdictBanner.Background = (Brush)new BrushConverter().ConvertFromString("#E8F5E9");
             }
             else
             {
                 VerdictText.Text = $"❌ ОШИБКА {result.Score}%";
-                VerdictText.Foreground = Brushes.Red;
+                VerdictText.Foreground = (Brush)new BrushConverter().ConvertFromString("#B71C1C");
+                VerdictBanner.Background = (Brush)new BrushConverter().ConvertFromString("#FDECEA");
             }
             
             
@@ -375,7 +395,7 @@ namespace RZDTrainer
             _isRecording = false;
             MicrophoneButton.Background = Brushes.Red;
             MicIcon.Text = "🎤";
-            MicButtonText.Text = "ЗАЖМИТЕ";
+            MicButtonText.Text = "ЗАЖМИТЕ И ГОВОРИТЕ";
             RecordingIndicator.Visibility = Visibility.Collapsed;
             _recognizer.StopRecordingAndFinalize();
         }
@@ -463,5 +483,10 @@ namespace RZDTrainer
     {
         public int MicrophoneDevice { get; set; } = -1;
         public string MicrophoneName { get; set; } = "";
+
+        // Жёсткая грамматика Vosk. По умолчанию ВЫКЛ — на маленькой модели она
+        // сильно режет распознавание. Включается вручную: "UseVoskGrammar": true
+        // в файле app_settings.json (рядом с программой).
+        public bool UseVoskGrammar { get; set; } = false;
     }
 }

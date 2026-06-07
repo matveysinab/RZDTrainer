@@ -22,7 +22,7 @@ namespace RZDTrainer.Services
 
         public bool IsAvailable => _model != null && _waveIn != null;
 
-        public void Initialize(string modelPath, int deviceNumber = 0, string? grammarFilePath = null)
+        public void Initialize(string modelPath, int deviceNumber = 0, string? grammarJson = null)
         {
             try
             {
@@ -39,7 +39,7 @@ namespace RZDTrainer.Services
                     }
 
                     _model = new Model(fullModelPath);
-                    _recognizer = new VoskRecognizer(_model, 16000.0f);
+                    _recognizer = CreateRecognizer(_model, grammarJson);
                     _recognizer.SetMaxAlternatives(0);
                     _recognizer.SetWords(false);
 
@@ -53,6 +53,27 @@ namespace RZDTrainer.Services
             {
                 throw new Exception($"Ошибка инициализации Vosk: {ex.Message}", ex);
             }
+        }
+
+        // Создаёт распознаватель. Если передана грамматика — ограничивает распознавание
+        // лексикой сценариев. При любой ошибке грамматики тихо откатываемся к полной модели,
+        // чтобы программа никогда не падала из-за словаря.
+        private static VoskRecognizer CreateRecognizer(Model model, string? grammarJson)
+        {
+            if (!string.IsNullOrWhiteSpace(grammarJson))
+            {
+                try
+                {
+                    var rec = new VoskRecognizer(model, 16000.0f, grammarJson);
+                    Debug.WriteLine("Vosk: грамматика применена (распознавание ограничено лексикой сценариев)");
+                    return rec;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Vosk: не удалось применить грамматику ({ex.Message}); используется полная модель");
+                }
+            }
+            return new VoskRecognizer(model, 16000.0f);
         }
 
         public void StartRecording()
