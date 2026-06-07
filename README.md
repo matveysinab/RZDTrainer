@@ -80,17 +80,3 @@ Windows 10/11 (64-bit)
 
 © 2026, Тренажер составителя поездов РЖД
 
-text
-
----
-
-## 📁 Как добавить в репозиторий:
-
-1. Создай файл `README.md` в корне проекта
-2. Скопируй туда содержимое выше
-3. Выполни:
-
-```bash
-git add README.md
-git commit -m "Add README.md"
-git push origin main
