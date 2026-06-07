@@ -50,5 +50,38 @@ namespace RZDTrainer.Models
         public List<string> AcceptableVariants { get; set; } = new();
         public List<string> WrongVariants { get; set; } = new();
         public string ResponseFrom { get; set; } = "";
+
+        // === НОВОЕ: сложность сценария ===
+        // Допустимые значения в scenarios.json: "Лёгкий", "Средний", "Сложный"
+        public string Difficulty { get; set; } = "";
+
+        // === НОВОЕ: имя файла картинки в папке images/ (например "sc-01.jpg") ===
+        public string Image { get; set; } = "";
+
+        // ---- Вспомогательные свойства для интерфейса (не читаются из JSON) ----
+
+        // Текст сложности с запасным значением
+        [JsonIgnore]
+        public string DifficultyLabel =>
+            string.IsNullOrWhiteSpace(Difficulty) ? "Средний" : Difficulty.Trim();
+
+        // Абсолютный путь к картинке (пустая строка, если файла нет)
+        [JsonIgnore]
+        public string ImageFullPath
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(Image)) return "";
+                var path = System.IO.Path.Combine(AppContext.BaseDirectory, "images", Image);
+                return System.IO.File.Exists(path) ? path : "";
+            }
+        }
+
+        [JsonIgnore]
+        public bool HasImage => !string.IsNullOrEmpty(ImageFullPath);
+
+        // "[СЦ-01] Подтверждение вызова ДСП" — для заголовка
+        [JsonIgnore]
+        public string DisplayTitle => $"[{Id}] {Title}";
     }
 }
