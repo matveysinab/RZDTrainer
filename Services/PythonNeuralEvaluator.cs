@@ -17,30 +17,30 @@ namespace RZDTrainer.Services
         {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            // 1. Сначала ищем встроенный Python (портативная версия)
+            //1.Сначала ищем встроенный Python(портативная версия)
             string embeddedPython = Path.Combine(baseDir, "python_runtime", "python.exe");
 
-            // 2. Если нет, ищем системный (твой путь)
-            //string systemPython = @"C:\Users\Matvey\AppData\Local\Python\pythoncore-3.14-64\python.exe";
+            //2.Если нет, ищем системный(твой путь)
+            string systemPython = @"C:\Users\Matvey\AppData\Local\Python\pythoncore-3.14-64\python.exe";
 
-            // 3. Если и его нет, пробуем просто "python"
-            //string fallbackPython = "python";
+            //3.Если и его нет, пробуем просто "python"
+            string fallbackPython = "python";
 
             if (File.Exists(embeddedPython))
             {
                 _pythonPath = embeddedPython;
-                Debug.WriteLine($"✅ Использую ВСТРОЕННЫЙ Python: {_pythonPath}");
+                Debug.WriteLine($" Использую ВСТРОЕННЫЙ Python: {_pythonPath}");
             }
-            //else if (File.Exists(systemPython))
-            //{
-            //    _pythonPath = systemPython;
-            //    Debug.WriteLine($"✅ Использую СИСТЕМНЫЙ Python: {_pythonPath}");
-            //}
-            //else
-            //{
-            //    _pythonPath = fallbackPython;
-            //    Debug.WriteLine($"⚠️ Использую PYTHON ИЗ PATH: {_pythonPath}");
-            //}
+            else if (File.Exists(systemPython))
+            {
+                _pythonPath = systemPython;
+                Debug.WriteLine($"Использую СИСТЕМНЫЙ Python: {_pythonPath}");
+            }
+            else
+            {
+                _pythonPath = fallbackPython;
+                Debug.WriteLine($" Использую PYTHON ИЗ PATH: {_pythonPath}");
+            }
 
             _scriptPath = Path.Combine(baseDir, "python", "evaluator.py");
 
